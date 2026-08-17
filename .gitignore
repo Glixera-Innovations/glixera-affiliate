@@ -1,0 +1,147 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+!.env.template
+!.env.test.example
+.envrc
+.direnv/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+*.secret
+*.secrets
+*.credentials
+*credentials*.json
+*service-account*.json
+discord-token.txt
+token.txt
+secrets/
+
+# Certificates and private keys
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Node.js dependencies and package-manager state
+node_modules/
+.pnp
+.pnp.js
+.pnp.cjs
+.yarn/cache/
+.yarn/install-state.gz
+.yarn/unplugged/
+.pnpm-store/
+.npm/
+
+# Build output and generated files
+dist/
+build/
+out/
+.output/
+.next/
+.nuxt/
+.svelte-kit/
+.parcel-cache/
+.turbo/
+.cache/
+coverage/
+.nyc_output/
+*.tsbuildinfo
+
+# Logs, diagnostics, and process files
+logs/
+*.log
+*.log.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+*.pid
+*.pid.lock
+*.seed
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Local databases and runtime state
+data/local/
+storage/local/
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Test and tooling caches
+.eslintcache
+.stylelintcache
+.prettier-cache
+.vitest/
+.jest-cache/
+.mocha-cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Python environments and bytecode (kept until the runtime is finalized)
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Cloud and deployment tool state
+.wrangler/
+.serverless/
+.terraform/
+*.tfstate
+*.tfstate.*
+.fly/
+.sentryclirc
+
+# Local container overrides
+compose.override.yaml
+compose.override.yml
+docker-compose.override.yaml
+docker-compose.override.yml
+
+# IDE and editor files
+.idea/
+*.iml
+.vscode/*
+!.vscode/extensions.json
+*.code-workspace
+*.swp
+*.swo
+*~
+
+# Operating-system metadata
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Temporary files, archives, and backups
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+*.zip
+*.tar
+*.tar.gz
+*.tgz

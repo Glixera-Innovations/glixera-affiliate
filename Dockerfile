@@ -1,21 +1,34 @@
-FROM node:24-alpine AS build
+# syntax=docker/dockerfile:1
+
+FROM node:24-alpine AS base
 
 WORKDIR /app
+
+FROM base AS build
 
 COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY tsconfig.json ./
-COPY src ./src
-RUN npm run build && npm prune --omit=dev
+COPY src/ ./src/
 
-FROM node:24-alpine AS runtime
+RUN test -f src/customIds.ts || \
+    (echo >&2 "ERROR: src/customIds.ts is missing from the Docker build context. Check the exact filename casing." && exit 1)
+RUN npm run build
+
+FROM base AS production-dependencies
 
 ENV NODE_ENV=production
-WORKDIR /app
 
-COPY --from=build --chown=node:node /app/package.json /app/package-lock.json ./
-COPY --from=build --chown=node:node /app/node_modules ./node_modules
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+
+FROM base AS runtime
+
+ENV NODE_ENV=production
+
+COPY --chown=node:node package.json package-lock.json ./
+COPY --from=production-dependencies --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
 
 USER node

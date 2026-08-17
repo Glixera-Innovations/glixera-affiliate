@@ -1,0 +1,30 @@
+{
+  "name": "glixera-affiliate",
+  "version": "0.1.0",
+  "description": "Discord bot for managing Glixera Innovations partnership checkups.",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=24.17.0 <25"
+  },
+  "packageManager": "npm@11.9.0",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "npm run typecheck && npm test",
+    "dev": "node --env-file-if-exists=.env --watch --import tsx src/index.ts",
+    "start": "node --enable-source-maps dist/index.js",
+    "start:local": "node --env-file-if-exists=.env --enable-source-maps dist/index.js",
+    "test": "node --import tsx --test test/customIds.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "discord.js": "^14.27.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2"
+  },
+  "license": "MIT"
+}

@@ -12,6 +12,8 @@ import { AllowedRoleStore } from "./allowedRoleStore.js";
 import { handleAllowedRoleCommand } from "./allowedRoles.js";
 import { loadConfig } from "./config.js";
 import { isCheckupCustomId } from "./customIds.js";
+import { isDiscordMissingAccessError } from "./discordErrors.js";
+import { errorEmbed } from "./embeds.js";
 import { startHealthServer } from "./health.js";
 import {
   handleMonthlyCheckupButton,
@@ -24,9 +26,9 @@ const allowedRoleStore = new AllowedRoleStore(
   config.dataDirectory,
   config.allowedRoleIds,
 );
-// Slash-command interactions only require the standard Guilds intent. Privileged
-// presence, member-list, and message-content intents deliberately remain disabled.
+// Slash-command interactions only require the standard Guilds intent.
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const discordRest = new REST({ version: "10" }).setToken(config.token);
 const healthServer = startHealthServer(config.port, () => client.isReady());
 
 function describeError(error: unknown): Readonly<Record<string, unknown>> {
@@ -41,18 +43,37 @@ function describeError(error: unknown): Readonly<Record<string, unknown>> {
   return { type: typeof error };
 }
 
-async function registerCommands(): Promise<void> {
-  const rest = new REST({ version: "10" }).setToken(config.token);
-
-  for (const guildId of config.guildIds) {
-    await rest.put(Routes.applicationGuildCommands(config.clientId, guildId), {
+async function registerCommandsForGuild(guildId: string): Promise<boolean> {
+  try {
+    await discordRest.put(Routes.applicationGuildCommands(config.clientId, guildId), {
       body: applicationCommands,
     });
+    console.info(
+      `Registered ${applicationCommands.length} guild command(s) in server ${guildId}.`,
+    );
+    return true;
+  } catch (error) {
+    if (!isDiscordMissingAccessError(error)) {
+      throw error;
+    }
+
+    console.warn(
+      `Skipped command registration for server ${guildId}: the application is not installed there or lacks the applications.commands scope.`,
+    );
+    return false;
+  }
+}
+
+async function registerCommands(): Promise<void> {
+  let registeredGuilds = 0;
+
+  for (const guildId of config.guildIds) {
+    if (await registerCommandsForGuild(guildId)) {
+      registeredGuilds += 1;
+    }
   }
 
-  console.info(
-    `Registered ${applicationCommands.length} guild command(s) in ${config.guildIds.length} server(s).`,
-  );
+  console.info(`Command registration completed for ${registeredGuilds} server(s).`);
 }
 
 client.once(Events.ClientReady, (readyClient) => {
@@ -68,6 +89,19 @@ client.on(Events.Warn, (warning) => {
 
 client.on(Events.Error, (error) => {
   console.error("Discord client error:", describeError(error));
+});
+
+client.on(Events.GuildCreate, (guild) => {
+  if (!config.guildIds.includes(guild.id)) {
+    return;
+  }
+
+  void registerCommandsForGuild(guild.id).catch((error: unknown) => {
+    console.error(
+      `Failed to register commands after joining server ${guild.id}:`,
+      describeError(error),
+    );
+  });
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -97,17 +131,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
 
-    const content = "Something went wrong while processing that action. Please try again.";
+    const embeds = [
+      errorEmbed(
+        "Something went wrong",
+        "The action could not be completed. Please try again or contact management if the problem continues.",
+      ),
+    ];
 
     if (interaction.deferred && !interaction.replied) {
-      await interaction.editReply({ content }).catch(() => undefined);
+      await interaction.editReply({ embeds }).catch(() => undefined);
     } else if (interaction.replied) {
       await interaction
-        .followUp({ content, flags: MessageFlags.Ephemeral })
+        .followUp({ embeds, flags: MessageFlags.Ephemeral })
         .catch(() => undefined);
     } else {
       await interaction
-        .reply({ content, flags: MessageFlags.Ephemeral })
+        .reply({ embeds, flags: MessageFlags.Ephemeral })
         .catch(() => undefined);
     }
   }

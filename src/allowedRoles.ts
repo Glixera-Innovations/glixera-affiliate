@@ -5,6 +5,12 @@ import {
 
 import type { AllowedRoleStore } from "./allowedRoleStore.js";
 import type { AppConfig } from "./config.js";
+import {
+  errorEmbed,
+  infoEmbed,
+  successEmbed,
+  warningEmbed,
+} from "./embeds.js";
 
 function isConfiguredGuild(config: AppConfig, guildId: string): boolean {
   return config.guildIds.includes(guildId);
@@ -40,8 +46,12 @@ async function rejectRoleManager(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
   await interaction.reply({
-    content:
-      "Only the server owner or a fallback management role can change allowed roles.",
+    embeds: [
+      errorEmbed(
+        "Access denied",
+        "Only the server owner or a fallback management role can change allowed roles.",
+      ),
+    ],
     flags: MessageFlags.Ephemeral,
   });
 }
@@ -53,7 +63,12 @@ export async function handleAllowedRoleCommand(
 ): Promise<void> {
   if (!interaction.inCachedGuild() || !isConfiguredGuild(config, interaction.guildId)) {
     await interaction.reply({
-      content: "This command is not available in this server.",
+      embeds: [
+        errorEmbed(
+          "Unavailable server",
+          "This command is not available in this server.",
+        ),
+      ],
       flags: MessageFlags.Ephemeral,
     });
     return;
@@ -64,23 +79,34 @@ export async function handleAllowedRoleCommand(
   if (subcommand === "list") {
     if (!canListAllowedRoles(interaction, store)) {
       await interaction.reply({
-        content: "You need an authorized role to view this server's allowed-role list.",
+        embeds: [
+          errorEmbed(
+            "Access denied",
+            "You need an authorized role to view this server's allowed-role list.",
+          ),
+        ],
         flags: MessageFlags.Ephemeral,
       });
       return;
     }
 
     const snapshot = store.getSnapshot(interaction.guildId);
+    const embed = infoEmbed(
+      "Allowed roles",
+      `Role access configuration for **${interaction.guild.name}**.`,
+    ).addFields(
+      {
+        name: "Management roles",
+        value: formatRoleList(snapshot.fallbackRoleIds),
+      },
+      {
+        name: "Allowed roles",
+        value: formatRoleList(snapshot.persistentRoleIds),
+      },
+    );
+
     await interaction.reply({
-      content: [
-        `**Allowed roles for ${interaction.guild.name}**`,
-        "",
-        "**Fallback roles (Fly secrets; protected)**",
-        formatRoleList(snapshot.fallbackRoleIds),
-        "",
-        "**Persistent roles (/data)**",
-        formatRoleList(snapshot.persistentRoleIds),
-      ].join("\n"),
+      embeds: [embed],
       allowedMentions: { parse: [] },
       flags: MessageFlags.Ephemeral,
     });
@@ -96,7 +122,12 @@ export async function handleAllowedRoleCommand(
 
   if (role.id === interaction.guildId || role.managed) {
     await interaction.reply({
-      content: "Select a normal server role; `@everyone` and managed integration roles are not supported.",
+      embeds: [
+        warningEmbed(
+          "Invalid role",
+          "Select a normal server role; `@everyone` and managed integration roles are not supported.",
+        ),
+      ],
       flags: MessageFlags.Ephemeral,
     });
     return;
@@ -104,15 +135,24 @@ export async function handleAllowedRoleCommand(
 
   if (subcommand === "add") {
     const result = await store.addPersistentRole(interaction.guildId, role.id);
-    const content =
+    const embed =
       result === "added"
-        ? `${role} can now use the bot's management commands in this server.`
+        ? successEmbed(
+            "Allowed role added",
+            `${role} can now use the bot's management commands in this server.`,
+          )
         : result === "fallback"
-          ? `${role} is already authorized through the fallback role.`
-          : `${role} is already in this server's allowed-role list.`;
+          ? infoEmbed(
+              "Role already authorized",
+              `${role} is already authorized through the fallback role.`,
+            )
+          : infoEmbed(
+              "Role already authorized",
+              `${role} is already in this server's allowed-role list.`,
+            );
 
     await interaction.reply({
-      content,
+      embeds: [embed],
       allowedMentions: { parse: [] },
       flags: MessageFlags.Ephemeral,
     });
@@ -121,15 +161,24 @@ export async function handleAllowedRoleCommand(
 
   if (subcommand === "remove") {
     const result = await store.removePersistentRole(interaction.guildId, role.id);
-    const content =
+    const embed =
       result === "removed"
-        ? `${role} was removed from this server's persistent allowed-role list.`
+        ? successEmbed(
+            "Allowed role removed",
+            `${role} was removed from this server's allowed-role list.`,
+          )
         : result === "fallback"
-          ? `${role} is protected by the fallback role and cannot be removed from Discord. Update ALLOWED_ROLE_IDS on Fly if you deliberately want to remove it.`
-          : `${role} is not in this server's persistent allowed-role list.`;
+          ? warningEmbed(
+              "Protected fallback role",
+              `${role} is protected by the fallback role and cannot be removed in Discord. Update \`ALLOWED_ROLE_IDS\` on Fly if you deliberately want to remove it.`,
+            )
+          : infoEmbed(
+              "Role not found",
+              `${role} is not in this server's persistent allowed-role list.`,
+            );
 
     await interaction.reply({
-      content,
+      embeds: [embed],
       allowedMentions: { parse: [] },
       flags: MessageFlags.Ephemeral,
     });
@@ -137,7 +186,7 @@ export async function handleAllowedRoleCommand(
   }
 
   await interaction.reply({
-    content: "Unknown allowed-role action.",
+    embeds: [errorEmbed("Unknown action", "That allowed-role action is not supported.")],
     flags: MessageFlags.Ephemeral,
   });
 }

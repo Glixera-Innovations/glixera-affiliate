@@ -26,12 +26,18 @@ RUN npm ci --omit=dev && npm cache clean --force
 FROM base AS runtime
 
 ENV NODE_ENV=production
+ENV DATA_DIR=/data
+
+RUN apk add --no-cache su-exec
 
 COPY --chown=node:node package.json package-lock.json ./
 COPY --from=production-dependencies --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-USER node
+RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh
+
 EXPOSE 8080
 
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node", "--enable-source-maps", "dist/index.js"]

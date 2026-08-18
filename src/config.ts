@@ -3,9 +3,10 @@ const SNOWFLAKE_PATTERN = /^\d{17,20}$/;
 export interface AppConfig {
   readonly token: string;
   readonly clientId: string;
-  readonly guildId: string;
+  readonly guildIds: readonly string[];
   readonly allowedRoleIds: readonly string[];
   readonly customIdSecret: string;
+  readonly dataDirectory: string;
   readonly timeZone: string;
   readonly port: number;
 }
@@ -45,6 +46,35 @@ function parseAllowedRoleIds(environment: NodeJS.ProcessEnv): readonly string[] 
   return Object.freeze([...new Set(values)]);
 }
 
+function parseGuildIds(environment: NodeJS.ProcessEnv): readonly string[] {
+  const configuredGuildIds = environment.DISCORD_GUILD_IDS
+    ?.split(",")
+    .map((value) => value.trim())
+    .filter(Boolean) ?? [];
+  const legacyGuildId = environment.DISCORD_GUILD_ID?.trim();
+  const values = legacyGuildId
+    ? [...configuredGuildIds, legacyGuildId]
+    : configuredGuildIds;
+
+  if (values.length === 0) {
+    throw new Error(
+      "Missing required environment variable: DISCORD_GUILD_IDS (or legacy DISCORD_GUILD_ID).",
+    );
+  }
+
+  if (values.some((value) => !SNOWFLAKE_PATTERN.test(value))) {
+    throw new Error(
+      "DISCORD_GUILD_IDS must contain one or more comma-separated Discord server IDs.",
+    );
+  }
+
+  return Object.freeze([...new Set(values)]);
+}
+
+function parseDataDirectory(value: string | undefined): string {
+  return value?.trim() || "./data";
+}
+
 function parsePort(value: string | undefined): number {
   const port = Number.parseInt(value ?? "8080", 10);
 
@@ -77,9 +107,10 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
   return Object.freeze({
     token: requireValue(environment, "DISCORD_TOKEN"),
     clientId: requireSnowflake(environment, "DISCORD_CLIENT_ID"),
-    guildId: requireSnowflake(environment, "DISCORD_GUILD_ID"),
+    guildIds: parseGuildIds(environment),
     allowedRoleIds: parseAllowedRoleIds(environment),
     customIdSecret,
+    dataDirectory: parseDataDirectory(environment.DATA_DIR),
     timeZone: parseTimeZone(environment.TIME_ZONE),
     port: parsePort(environment.PORT),
   });

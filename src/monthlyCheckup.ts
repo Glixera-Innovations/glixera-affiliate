@@ -16,6 +16,7 @@ import {
   type TextChannel,
 } from "discord.js";
 
+import type { AllowedRoleStore } from "./allowedRoleStore.js";
 import type { AppConfig } from "./config.js";
 import {
   createCheckupCustomId,
@@ -32,16 +33,28 @@ const REQUIRED_CHANNEL_PERMISSIONS = [
   PermissionFlagsBits.EmbedLinks,
 ] as const;
 
-function hasAllowedRole(member: GuildMember, allowedRoleIds: readonly string[]): boolean {
-  return allowedRoleIds.some((roleId) => member.roles.cache.has(roleId));
+function isConfiguredGuild(config: AppConfig, guildId: string): boolean {
+  return config.guildIds.includes(guildId);
+}
+
+function hasAllowedRole(
+  member: GuildMember,
+  guildId: string,
+  allowedRoleStore: AllowedRoleStore,
+): boolean {
+  return allowedRoleStore.hasAllowedRole(guildId, member.roles.cache);
 }
 
 function canUseCheckup(
   member: GuildMember,
+  guildId: string,
   partnerRoleId: string,
-  allowedRoleIds: readonly string[],
+  allowedRoleStore: AllowedRoleStore,
 ): boolean {
-  return member.roles.cache.has(partnerRoleId) || hasAllowedRole(member, allowedRoleIds);
+  return (
+    member.roles.cache.has(partnerRoleId) ||
+    hasAllowedRole(member, guildId, allowedRoleStore)
+  );
 }
 
 function botCanSend(channel: TextChannel, botMember: GuildMember): boolean {
@@ -61,7 +74,30 @@ function normalizePeriod(value: string | null, timeZone: string): string | null 
   return period.length > 0 && period.length <= 40 ? period : null;
 }
 
-function buildQuestionnaireEmbed(period: string, requestedBy: string): EmbedBuilder {
+function formatBotTime(timeZone: string): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+    timeZone,
+    timeZoneName: "short",
+  }).format(new Date());
+}
+
+function asMultilineCodeBlock(value: string): string {
+  const content = (value || "None provided").replaceAll("```", "`\u200b`");
+  return `\`\`\`\n${content}\n\`\`\``;
+}
+
+function buildQuestionnaireEmbed(
+  period: string,
+  requestedBy: string,
+  timeZone: string,
+): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(QUESTIONNAIRE_COLOR)
     .setTitle(`Monthly Partnership Checkup • ${period}`)
@@ -87,7 +123,9 @@ function buildQuestionnaireEmbed(period: string, requestedBy: string): EmbedBuil
       },
     )
     .setFooter({
-      text: `Requested by ${requestedBy} • Management can close this checkup when complete.`,
+      text:
+        `Requested by ${requestedBy} • Bot time: ${formatBotTime(timeZone)} • ` +
+        "Management can close this checkup when complete.",
     })
     .setTimestamp();
 }
@@ -155,8 +193,9 @@ function buildAnswerModal(context: CheckupContext, config: AppConfig): ModalBuil
 export async function handleMonthlyCheckupCommand(
   interaction: ChatInputCommandInteraction,
   config: AppConfig,
+  allowedRoleStore: AllowedRoleStore,
 ): Promise<void> {
-  if (!interaction.inCachedGuild() || interaction.guildId !== config.guildId) {
+  if (!interaction.inCachedGuild() || !isConfiguredGuild(config, interaction.guildId)) {
     await interaction.reply({
       content: "This command is only available in the configured Glixera server.",
       flags: MessageFlags.Ephemeral,
@@ -164,7 +203,7 @@ export async function handleMonthlyCheckupCommand(
     return;
   }
 
-  if (!hasAllowedRole(interaction.member, config.allowedRoleIds)) {
+  if (!hasAllowedRole(interaction.member, interaction.guildId, allowedRoleStore)) {
     await interaction.reply({
       content: "You do not have an authorized management role for this command.",
       flags: MessageFlags.Ephemeral,
@@ -179,6 +218,7 @@ export async function handleMonthlyCheckupCommand(
   const selectedResponseChannel = interaction.options.getChannel("response-channel");
   const responseChannel = selectedResponseChannel ?? questionnaireChannel;
   const period = normalizePeriod(interaction.options.getString("period"), config.timeZone);
+  const allowedRoleIds = allowedRoleStore.getSnapshot(interaction.guildId).allRoleIds;
 
   if (questionnaireChannel.type !== ChannelType.GuildText) {
     await interaction.editReply("The questionnaire destination must be a server text channel.");
@@ -198,7 +238,7 @@ export async function handleMonthlyCheckupCommand(
   if (
     partnerRole.id === interaction.guild.id ||
     partnerRole.managed ||
-    config.allowedRoleIds.includes(partnerRole.id)
+    allowedRoleIds.includes(partnerRole.id)
   ) {
     await interaction.editReply(
       "Select a normal partnership role. `@everyone`, managed integration roles, and management roles cannot be targeted.",
@@ -246,7 +286,7 @@ export async function handleMonthlyCheckupCommand(
   };
   const questionnaire = await questionnaireChannel.send({
     content: partnerRole.toString(),
-    embeds: [buildQuestionnaireEmbed(period, interaction.user.username)],
+    embeds: [buildQuestionnaireEmbed(period, interaction.user.username, config.timeZone)],
     components: [buildCheckupButtons(context, config)],
     allowedMentions: {
       parse: [],
@@ -265,8 +305,9 @@ export async function handleMonthlyCheckupCommand(
 export async function handleMonthlyCheckupButton(
   interaction: ButtonInteraction,
   config: AppConfig,
+  allowedRoleStore: AllowedRoleStore,
 ): Promise<void> {
-  if (!interaction.inCachedGuild() || interaction.guildId !== config.guildId) {
+  if (!interaction.inCachedGuild() || !isConfiguredGuild(config, interaction.guildId)) {
     await interaction.reply({
       content: "This checkup is not available in this server.",
       flags: MessageFlags.Ephemeral,
@@ -286,7 +327,14 @@ export async function handleMonthlyCheckupButton(
   }
 
   if (parsed.action === "answer") {
-    if (!canUseCheckup(interaction.member, parsed.partnerRoleId, config.allowedRoleIds)) {
+    if (
+      !canUseCheckup(
+        interaction.member,
+        interaction.guildId,
+        parsed.partnerRoleId,
+        allowedRoleStore,
+      )
+    ) {
       await interaction.reply({
         content: "Only members of the selected partnership role or management can answer this checkup.",
         flags: MessageFlags.Ephemeral,
@@ -298,7 +346,7 @@ export async function handleMonthlyCheckupButton(
     return;
   }
 
-  if (!hasAllowedRole(interaction.member, config.allowedRoleIds)) {
+  if (!hasAllowedRole(interaction.member, interaction.guildId, allowedRoleStore)) {
     await interaction.reply({
       content: "Only an authorized management role can close this checkup.",
       flags: MessageFlags.Ephemeral,
@@ -329,8 +377,9 @@ export async function handleMonthlyCheckupButton(
 export async function handleMonthlyCheckupModal(
   interaction: ModalSubmitInteraction,
   config: AppConfig,
+  allowedRoleStore: AllowedRoleStore,
 ): Promise<void> {
-  if (!interaction.inCachedGuild() || interaction.guildId !== config.guildId) {
+  if (!interaction.inCachedGuild() || !isConfiguredGuild(config, interaction.guildId)) {
     await interaction.reply({
       content: "This checkup is not available in this server.",
       flags: MessageFlags.Ephemeral,
@@ -349,7 +398,14 @@ export async function handleMonthlyCheckupModal(
     return;
   }
 
-  if (!canUseCheckup(interaction.member, parsed.partnerRoleId, config.allowedRoleIds)) {
+  if (
+    !canUseCheckup(
+      interaction.member,
+      interaction.guildId,
+      parsed.partnerRoleId,
+      allowedRoleStore,
+    )
+  ) {
     await interaction.reply({
       content: "You no longer have the partnership role required to submit this checkup.",
       flags: MessageFlags.Ephemeral,
@@ -400,13 +456,15 @@ export async function handleMonthlyCheckupModal(
       iconURL: interaction.user.displayAvatarURL({ size: 128 }),
     })
     .addFields(
-      { name: "Announcements", value: announcements || "None provided" },
+      { name: "Announcements", value: asMultilineCodeBlock(announcements) },
       { name: "Events", value: events || "None provided" },
-      { name: "Partnership feedback", value: feedback || "None provided" },
+      { name: "artnership feedback", value: feedback || "None provided" },
       { name: "Submitted by", value: `<@${interaction.user.id}>`, inline: true },
       { name: "Partnership role", value: partnerRole.toString(), inline: true },
     )
-    .setFooter({ text: `Response ID: ${interaction.id}` })
+    .setFooter({
+      text: `Response ID: ${interaction.id} • Bot time: ${formatBotTime(config.timeZone)}`,
+    })
     .setTimestamp();
 
   await responseChannel.send({

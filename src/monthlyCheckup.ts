@@ -23,6 +23,12 @@ import {
   parseCheckupCustomId,
   type CheckupContext,
 } from "./customIds.js";
+import {
+  errorEmbed,
+  infoEmbed,
+  successEmbed,
+  warningEmbed,
+} from "./embeds.js";
 
 const QUESTIONNAIRE_COLOR = 0x5865f2;
 const RESPONSE_COLOR = 0x57f287;
@@ -74,20 +80,6 @@ function normalizePeriod(value: string | null, timeZone: string): string | null 
   return period.length > 0 && period.length <= 40 ? period : null;
 }
 
-function formatBotTime(timeZone: string): string {
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-    timeZone,
-    timeZoneName: "short",
-  }).format(new Date());
-}
-
 function asMultilineCodeBlock(value: string): string {
   const content = (value || "None provided").replaceAll("```", "`\u200b`");
   return `\`\`\`\n${content}\n\`\`\``;
@@ -96,7 +88,6 @@ function asMultilineCodeBlock(value: string): string {
 function buildQuestionnaireEmbed(
   period: string,
   requestedBy: string,
-  timeZone: string,
 ): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(QUESTIONNAIRE_COLOR)
@@ -123,11 +114,8 @@ function buildQuestionnaireEmbed(
       },
     )
     .setFooter({
-      text:
-        `Requested by ${requestedBy} • Bot time: ${formatBotTime(timeZone)} • ` +
-        "Management can close this checkup when complete.",
-    })
-    .setTimestamp();
+      text: `Requested by ${requestedBy} • Management can close this checkup when complete.`,
+    });
 }
 
 function buildCheckupButtons(
@@ -197,7 +185,12 @@ export async function handleMonthlyCheckupCommand(
 ): Promise<void> {
   if (!interaction.inCachedGuild() || !isConfiguredGuild(config, interaction.guildId)) {
     await interaction.reply({
-      content: "This command is only available in the configured Glixera server.",
+      embeds: [
+        errorEmbed(
+          "Unavailable server",
+          "This command is only available in a configured Glixera server.",
+        ),
+      ],
       flags: MessageFlags.Ephemeral,
     });
     return;
@@ -205,7 +198,12 @@ export async function handleMonthlyCheckupCommand(
 
   if (!hasAllowedRole(interaction.member, interaction.guildId, allowedRoleStore)) {
     await interaction.reply({
-      content: "You do not have an authorized management role for this command.",
+      embeds: [
+        errorEmbed(
+          "Access denied",
+          "You do not have an authorized management role for this command.",
+        ),
+      ],
       flags: MessageFlags.Ephemeral,
     });
     return;
@@ -221,17 +219,38 @@ export async function handleMonthlyCheckupCommand(
   const allowedRoleIds = allowedRoleStore.getSnapshot(interaction.guildId).allRoleIds;
 
   if (questionnaireChannel.type !== ChannelType.GuildText) {
-    await interaction.editReply("The questionnaire destination must be a server text channel.");
+    await interaction.editReply({
+      embeds: [
+        warningEmbed(
+          "Invalid questionnaire channel",
+          "The questionnaire destination must be a server text channel.",
+        ),
+      ],
+    });
     return;
   }
 
   if (responseChannel.type !== ChannelType.GuildText) {
-    await interaction.editReply("The response destination must be a server text channel.");
+    await interaction.editReply({
+      embeds: [
+        warningEmbed(
+          "Invalid response channel",
+          "The response destination must be a server text channel.",
+        ),
+      ],
+    });
     return;
   }
 
   if (!period) {
-    await interaction.editReply("The checkup period must contain between 1 and 40 characters.");
+    await interaction.editReply({
+      embeds: [
+        warningEmbed(
+          "Invalid period",
+          "The checkup period must contain between 1 and 40 characters.",
+        ),
+      ],
+    });
     return;
   }
 
@@ -240,30 +259,54 @@ export async function handleMonthlyCheckupCommand(
     partnerRole.managed ||
     allowedRoleIds.includes(partnerRole.id)
   ) {
-    await interaction.editReply(
-      "Select a normal partnership role. `@everyone`, managed integration roles, and management roles cannot be targeted.",
-    );
+    await interaction.editReply({
+      embeds: [
+        warningEmbed(
+          "Invalid partnership role",
+          "Select a normal partnership role. `@everyone`, managed integration roles, and management roles cannot be targeted.",
+        ),
+      ],
+    });
     return;
   }
 
   const botMember = interaction.guild.members.me;
 
   if (!botMember) {
-    await interaction.editReply("I could not verify my server permissions. Please try again shortly.");
+    await interaction.editReply({
+      embeds: [
+        errorEmbed(
+          "Permission check failed",
+          "I could not verify my server permissions. Please try again shortly.",
+        ),
+      ],
+    });
     return;
   }
 
   if (!botCanSend(questionnaireChannel, botMember)) {
-    await interaction.editReply(
-      `I need **View Channel**, **Send Messages**, and **Embed Links** in ${questionnaireChannel}.`,
-    );
+    await interaction.editReply({
+      embeds: [
+        errorEmbed(
+          "Missing bot permissions",
+          `I need **View Channel**, **Send Messages**, and **Embed Links** in ${questionnaireChannel}.`,
+        ),
+      ],
+      allowedMentions: { parse: [] },
+    });
     return;
   }
 
   if (!botCanSend(responseChannel, botMember)) {
-    await interaction.editReply(
-      `I need **View Channel**, **Send Messages**, and **Embed Links** in ${responseChannel}.`,
-    );
+    await interaction.editReply({
+      embeds: [
+        errorEmbed(
+          "Missing bot permissions",
+          `I need **View Channel**, **Send Messages**, and **Embed Links** in ${responseChannel}.`,
+        ),
+      ],
+      allowedMentions: { parse: [] },
+    });
     return;
   }
 
@@ -273,9 +316,15 @@ export async function handleMonthlyCheckupCommand(
       false);
 
   if (!canMentionRole) {
-    await interaction.editReply(
-      `${partnerRole} is not mentionable. Either make that partnership role mentionable or give the bot the **Mention @everyone, @here, and All Roles** permission in ${questionnaireChannel}.`,
-    );
+    await interaction.editReply({
+      embeds: [
+        warningEmbed(
+          "Role cannot be mentioned",
+          `${partnerRole} is not mentionable. Either make that partnership role mentionable or give the bot the **Mention @everyone, @here, and All Roles** permission in ${questionnaireChannel}.`,
+        ),
+      ],
+      allowedMentions: { parse: [] },
+    });
     return;
   }
 
@@ -286,7 +335,7 @@ export async function handleMonthlyCheckupCommand(
   };
   const questionnaire = await questionnaireChannel.send({
     content: partnerRole.toString(),
-    embeds: [buildQuestionnaireEmbed(period, interaction.user.username, config.timeZone)],
+    embeds: [buildQuestionnaireEmbed(period, interaction.user.username)],
     components: [buildCheckupButtons(context, config)],
     allowedMentions: {
       parse: [],
@@ -295,9 +344,12 @@ export async function handleMonthlyCheckupCommand(
   });
 
   await interaction.editReply({
-    content:
-      `Monthly checkup sent to ${questionnaireChannel} for ${partnerRole}. ` +
-      `Completed answers will go to ${responseChannel}. [Open questionnaire](${questionnaire.url})`,
+    embeds: [
+      successEmbed(
+        "Monthly checkup sent",
+        `Sent to ${questionnaireChannel} for ${partnerRole}. Completed answers will go to ${responseChannel}. [Open questionnaire](${questionnaire.url})`,
+      ),
+    ],
     allowedMentions: { parse: [] },
   });
 }
@@ -309,7 +361,12 @@ export async function handleMonthlyCheckupButton(
 ): Promise<void> {
   if (!interaction.inCachedGuild() || !isConfiguredGuild(config, interaction.guildId)) {
     await interaction.reply({
-      content: "This checkup is not available in this server.",
+      embeds: [
+        errorEmbed(
+          "Unavailable checkup",
+          "This checkup is not available in this server.",
+        ),
+      ],
       flags: MessageFlags.Ephemeral,
     });
     return;
@@ -319,8 +376,12 @@ export async function handleMonthlyCheckupButton(
 
   if (!parsed || (parsed.action !== "answer" && parsed.action !== "close")) {
     await interaction.reply({
-      content:
-        "This checkup control is invalid or was signed with an older secret. Ask management to send a new checkup.",
+      embeds: [
+        warningEmbed(
+          "Invalid checkup",
+          "This checkup control is invalid or was signed with an older secret. Ask management to send a new checkup.",
+        ),
+      ],
       flags: MessageFlags.Ephemeral,
     });
     return;
@@ -336,7 +397,12 @@ export async function handleMonthlyCheckupButton(
       )
     ) {
       await interaction.reply({
-        content: "Only members of the selected partnership role or management can answer this checkup.",
+        embeds: [
+          errorEmbed(
+            "Access denied",
+            "Only members of the selected partnership role or management can answer this checkup.",
+          ),
+        ],
         flags: MessageFlags.Ephemeral,
       });
       return;
@@ -348,7 +414,12 @@ export async function handleMonthlyCheckupButton(
 
   if (!hasAllowedRole(interaction.member, interaction.guildId, allowedRoleStore)) {
     await interaction.reply({
-      content: "Only an authorized management role can close this checkup.",
+      embeds: [
+        errorEmbed(
+          "Access denied",
+          "Only an authorized management role can close this checkup.",
+        ),
+      ],
       flags: MessageFlags.Ephemeral,
     });
     return;
@@ -361,15 +432,16 @@ export async function handleMonthlyCheckupButton(
 
   closedEmbed
     .setColor(CLOSED_COLOR)
-    .setFooter({ text: `Closed by ${interaction.user.username}` })
-    .setTimestamp();
+    .setFooter({ text: `Closed by ${interaction.user.username}` });
 
   await interaction.update({
     embeds: [closedEmbed],
     components: [buildCheckupButtons(parsed, config, true)],
   });
   await interaction.followUp({
-    content: "The monthly checkup is now closed.",
+    embeds: [
+      infoEmbed("Monthly checkup closed", "The monthly checkup is now closed."),
+    ],
     flags: MessageFlags.Ephemeral,
   });
 }
@@ -381,7 +453,12 @@ export async function handleMonthlyCheckupModal(
 ): Promise<void> {
   if (!interaction.inCachedGuild() || !isConfiguredGuild(config, interaction.guildId)) {
     await interaction.reply({
-      content: "This checkup is not available in this server.",
+      embeds: [
+        errorEmbed(
+          "Unavailable checkup",
+          "This checkup is not available in this server.",
+        ),
+      ],
       flags: MessageFlags.Ephemeral,
     });
     return;
@@ -391,8 +468,12 @@ export async function handleMonthlyCheckupModal(
 
   if (!parsed || parsed.action !== "submit") {
     await interaction.reply({
-      content:
-        "This questionnaire is invalid or was signed with an older secret. Ask management to send a new checkup.",
+      embeds: [
+        warningEmbed(
+          "Invalid questionnaire",
+          "This questionnaire is invalid or was signed with an older secret. Ask management to send a new checkup.",
+        ),
+      ],
       flags: MessageFlags.Ephemeral,
     });
     return;
@@ -407,7 +488,12 @@ export async function handleMonthlyCheckupModal(
     )
   ) {
     await interaction.reply({
-      content: "You no longer have the partnership role required to submit this checkup.",
+      embeds: [
+        errorEmbed(
+          "Access denied",
+          "You no longer have the partnership role required to submit this checkup.",
+        ),
+      ],
       flags: MessageFlags.Ephemeral,
     });
     return;
@@ -421,25 +507,40 @@ export async function handleMonthlyCheckupModal(
   ]);
 
   if (!partnerRole) {
-    await interaction.editReply(
-      "The partnership role no longer exists. Ask management to send a new checkup.",
-    );
+    await interaction.editReply({
+      embeds: [
+        warningEmbed(
+          "Partnership role missing",
+          "The partnership role no longer exists. Ask management to send a new checkup.",
+        ),
+      ],
+    });
     return;
   }
 
   if (!responseChannel || responseChannel.type !== ChannelType.GuildText) {
-    await interaction.editReply(
-      "The configured response channel no longer exists. Please contact management.",
-    );
+    await interaction.editReply({
+      embeds: [
+        errorEmbed(
+          "Response channel missing",
+          "The configured response channel no longer exists. Please contact management.",
+        ),
+      ],
+    });
     return;
   }
 
   const botMember = interaction.guild.members.me;
 
   if (!botMember || !botCanSend(responseChannel, botMember)) {
-    await interaction.editReply(
-      "I can no longer post in the configured response channel. Please contact management.",
-    );
+    await interaction.editReply({
+      embeds: [
+        errorEmbed(
+          "Cannot post response",
+          "I can no longer post in the configured response channel. Please contact management.",
+        ),
+      ],
+    });
     return;
   }
 
@@ -458,21 +559,25 @@ export async function handleMonthlyCheckupModal(
     .addFields(
       { name: "Announcements", value: asMultilineCodeBlock(announcements) },
       { name: "Events", value: events || "None provided" },
-      { name: "artnership feedback", value: feedback || "None provided" },
+      { name: "Partnership feedback", value: feedback || "None provided" },
       { name: "Submitted by", value: `<@${interaction.user.id}>`, inline: true },
       { name: "Partnership role", value: partnerRole.toString(), inline: true },
     )
     .setFooter({
-      text: `Response ID: ${interaction.id} • Bot time: ${formatBotTime(config.timeZone)}`,
-    })
-    .setTimestamp();
+      text: `Response ID: ${interaction.id}`,
+    });
 
   await responseChannel.send({
     embeds: [responseEmbed],
     allowedMentions: { parse: [] },
   });
 
-  await interaction.editReply(
-    "Thank you! Your monthly partnership checkup was submitted successfully.",
-  );
+  await interaction.editReply({
+    embeds: [
+      successEmbed(
+        "Checkup submitted",
+        "Thank you! Your monthly partnership checkup was submitted successfully.",
+      ),
+    ],
+  });
 }

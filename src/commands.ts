@@ -29,4 +29,38 @@ export const monthlyCheckupCommand = new SlashCommandBuilder()
       .setMaxLength(40),
   );
 
-export const applicationCommands = [monthlyCheckupCommand.toJSON()];
+export const allowedRoleCommand = new SlashCommandBuilder()
+  .setName("allowed-role")
+  .setDescription("Manage which server roles can use Glixera management commands.")
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("add")
+      .setDescription("Add an allowed role for this server.")
+      .addRoleOption((option) =>
+        option
+          .setName("role")
+          .setDescription("The role to authorize.")
+          .setRequired(true),
+      ),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("remove")
+      .setDescription("Remove a role from this server's allowed list.")
+      .addRoleOption((option) =>
+        option
+          .setName("role")
+          .setDescription("The role to remove.")
+          .setRequired(true),
+      ),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("list")
+      .setDescription("Show fallback and allowed roles for this server."),
+  );
+
+export const applicationCommands = [
+  monthlyCheckupCommand.toJSON(),
+  allowedRoleCommand.toJSON(),
+];

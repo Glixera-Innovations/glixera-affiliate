@@ -1,5 +1,7 @@
 # Glixera | Affiliate Services
 
+[![CodeQL Advanced](https://github.com/Glixera-Innovations/glixera-affiliate/actions/workflows/codeql.yml/badge.svg)](https://github.com/Glixera-Innovations/glixera-affiliate/actions/workflows/codeql.yml)
+
 Glixera Affiliate Services is a Discord bot project for managing partnerships and affiliate relationships for **Glixera Innovations**.
 
 ## Purpose

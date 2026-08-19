@@ -25,7 +25,7 @@ export const monthlyCheckupCommand = new SlashCommandBuilder()
   .addStringOption((option) =>
     option
       .setName("period")
-      .setDescription("Optional label, for example: August 2026.")
+      .setDescription("For example: August 2026.")
       .setMaxLength(40),
   );
 

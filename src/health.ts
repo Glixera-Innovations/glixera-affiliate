@@ -27,7 +27,10 @@ export function startHealthServer(port: number, isDiscordReady: () => boolean): 
   });
 
   server.listen(port, "0.0.0.0", () => {
-    console.info(`Health server listening on 0.0.0.0:${port}`);
+    const address = server.address();
+    const listeningPort =
+      typeof address === "object" && address !== null ? address.port : port;
+    console.info(`Health server listening on 0.0.0.0:${listeningPort}`);
   });
 
   return server;

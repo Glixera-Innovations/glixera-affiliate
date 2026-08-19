@@ -16,10 +16,10 @@ import { isCheckupCustomId } from "./customIds.js";
 import { isDiscordMissingAccessError } from "./discordErrors.js";
 import { errorEmbed } from "./embeds.js";
 import {
-  handleMonthlyCheckupButton,
-  handleMonthlyCheckupCommand,
-  handleMonthlyCheckupModal,
-} from "./monthlyCheckup.js";
+  handleWeeklyCheckupButton,
+  handleWeeklyCheckupCommand,
+  handleWeeklyCheckupModal,
+} from "./weeklyCheckup.js";
 
 const config = loadConfig();
 const allowedRoleStore = new AllowedRoleStore(
@@ -110,18 +110,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
 
-    if (interaction.isChatInputCommand() && interaction.commandName === "monthly-checkup") {
-      await handleMonthlyCheckupCommand(interaction, config, allowedRoleStore);
+    if (interaction.isChatInputCommand() && interaction.commandName === "weekly-checkup") {
+      await handleWeeklyCheckupCommand(interaction, config, allowedRoleStore);
       return;
     }
 
     if (interaction.isButton() && isCheckupCustomId(interaction.customId)) {
-      await handleMonthlyCheckupButton(interaction, config, allowedRoleStore);
+      await handleWeeklyCheckupButton(interaction, config, allowedRoleStore);
       return;
     }
 
     if (interaction.isModalSubmit() && isCheckupCustomId(interaction.customId)) {
-      await handleMonthlyCheckupModal(interaction, config, allowedRoleStore);
+      await handleWeeklyCheckupModal(interaction, config, allowedRoleStore);
     }
   } catch (error) {
     console.error("Failed to handle a Discord interaction:", describeError(error));

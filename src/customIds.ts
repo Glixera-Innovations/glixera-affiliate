@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-const PREFIX = "mcq";
+const PREFIX = "wcq";
+const LEGACY_PREFIX = "mcq";
 const VERSION = "1";
 const SIGNATURE_LENGTH = 16;
 const SNOWFLAKE_PATTERN = /^\d{17,20}$/;
@@ -155,5 +156,8 @@ export function parseCheckupCustomId(
 }
 
 export function isCheckupCustomId(customId: string): boolean {
-  return customId.startsWith(`${PREFIX}:`);
+  return (
+    customId.startsWith(`${PREFIX}:`) ||
+    customId.startsWith(`${LEGACY_PREFIX}:`)
+  );
 }

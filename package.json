@@ -4,7 +4,7 @@
   "description": "Discord bot for managing Glixera Innovations partnership checkups.",
   "private": true,
   "type": "module",
-  "main": "dist/index.js",
+  "main": "dist/bootstrap.js",
   "engines": {
     "node": ">=24.17.0 <25"
   },
@@ -12,9 +12,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "npm run typecheck && npm test",
-    "dev": "node --env-file-if-exists=.env --watch --import tsx src/index.ts",
-    "start": "node --enable-source-maps dist/index.js",
-    "start:local": "node --env-file-if-exists=.env --enable-source-maps dist/index.js",
+    "dev": "node --env-file-if-exists=.env --watch --import tsx src/bootstrap.ts",
+    "start": "node --enable-source-maps dist/bootstrap.js",
+    "start:local": "node --env-file-if-exists=.env --enable-source-maps dist/bootstrap.js",
     "test": "node --import tsx --test test/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
   },

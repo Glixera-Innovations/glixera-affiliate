@@ -6,6 +6,7 @@ import {
   REST,
   Routes,
 } from "discord.js";
+import type { Server } from "node:http";
 
 import { applicationCommands } from "./commands.js";
 import { AllowedRoleStore } from "./allowedRoleStore.js";
@@ -14,7 +15,6 @@ import { loadConfig } from "./config.js";
 import { isCheckupCustomId } from "./customIds.js";
 import { isDiscordMissingAccessError } from "./discordErrors.js";
 import { errorEmbed } from "./embeds.js";
-import { startHealthServer } from "./health.js";
 import {
   handleMonthlyCheckupButton,
   handleMonthlyCheckupCommand,
@@ -29,7 +29,6 @@ const allowedRoleStore = new AllowedRoleStore(
 // Slash-command interactions only require the standard Guilds intent.
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const discordRest = new REST({ version: "10" }).setToken(config.token);
-const healthServer = startHealthServer(config.port, () => client.isReady());
 
 function describeError(error: unknown): Readonly<Record<string, unknown>> {
   if (error instanceof Error) {
@@ -152,32 +151,29 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-let isShuttingDown = false;
+export async function startBot(healthServer: Server): Promise<() => boolean> {
+  let isShuttingDown = false;
 
-function shutDown(signal: NodeJS.Signals): void {
-  if (isShuttingDown) {
-    return;
+  function shutDown(signal: NodeJS.Signals): void {
+    if (isShuttingDown) {
+      return;
+    }
+
+    isShuttingDown = true;
+    console.info(`Received ${signal}; shutting down.`);
+    client.destroy();
+    healthServer.close(() => process.exit(0));
+
+    setTimeout(() => process.exit(1), 10_000).unref();
   }
 
-  isShuttingDown = true;
-  console.info(`Received ${signal}; shutting down.`);
-  client.destroy();
-  healthServer.close(() => process.exit(0));
+  process.once("SIGINT", shutDown);
+  process.once("SIGTERM", shutDown);
 
-  setTimeout(() => process.exit(1), 10_000).unref();
-}
-
-process.once("SIGINT", shutDown);
-process.once("SIGTERM", shutDown);
-
-async function main(): Promise<void> {
   await allowedRoleStore.initialize();
   console.info(`Allowed-role store ready at ${allowedRoleStore.filePath}.`);
   await registerCommands();
   await client.login(config.token);
-}
 
-main().catch((error: unknown) => {
-  console.error("Glixera Affiliate failed to start:", describeError(error));
-  healthServer.close(() => process.exit(1));
-});
+  return () => client.isReady();
+}

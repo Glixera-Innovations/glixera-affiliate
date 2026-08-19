@@ -85,7 +85,7 @@ function asMultilineCodeBlock(value: string): string {
   return `\`\`\`\n${content}\n\`\`\``;
 }
 
-function buildQuestionnaireEmbed(
+export function buildQuestionnaireEmbed(
   period: string,
   requestedBy: string,
 ): EmbedBuilder {
@@ -565,7 +565,8 @@ export async function handleMonthlyCheckupModal(
     )
     .setFooter({
       text: `Response ID: ${interaction.id}`,
-    });
+    })
+    .setTimestamp();
 
   await responseChannel.send({
     embeds: [responseEmbed],

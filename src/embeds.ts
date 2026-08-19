@@ -19,7 +19,8 @@ function buildEmbed(
     .setColor(COLORS[tone])
     .setTitle(title)
     .setDescription(description)
-    .setFooter({ text: "Glixera | Affiliate Services" });
+    .setFooter({ text: "Glixera | Affiliate Services" })
+    .setTimestamp();
 }
 
 export function errorEmbed(title: string, description: string): EmbedBuilder {

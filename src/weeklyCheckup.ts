@@ -67,12 +67,70 @@ function botCanSend(channel: TextChannel, botMember: GuildMember): boolean {
   return channel.permissionsFor(botMember)?.has(REQUIRED_CHANNEL_PERMISSIONS) ?? false;
 }
 
-function defaultPeriod(timeZone: string): string {
-  return new Intl.DateTimeFormat("en-GB", {
-    month: "long",
+function calendarDateInTimeZone(value: Date, timeZone: string): Date {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
     year: "numeric",
     timeZone,
-  }).format(new Date());
+  }).formatToParts(value);
+  const part = (type: Intl.DateTimeFormatPartTypes): number => {
+    const parsed = Number.parseInt(
+      parts.find((candidate) => candidate.type === type)?.value ?? "",
+      10,
+    );
+
+    if (!Number.isInteger(parsed)) {
+      throw new Error(`Unable to calculate the current ${type} in ${timeZone}.`);
+    }
+
+    return parsed;
+  };
+
+  return new Date(Date.UTC(part("year"), part("month") - 1, part("day")));
+}
+
+function formatWeekRange(start: Date, end: Date): string {
+  const day = new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    timeZone: "UTC",
+  });
+  const month = new Intl.DateTimeFormat("en-GB", {
+    month: "short",
+    timeZone: "UTC",
+  });
+  const year = new Intl.DateTimeFormat("en-GB", {
+    year: "numeric",
+    timeZone: "UTC",
+  });
+
+  if (
+    start.getUTCFullYear() === end.getUTCFullYear() &&
+    start.getUTCMonth() === end.getUTCMonth()
+  ) {
+    return `${day.format(start)}–${day.format(end)} ${month.format(end)} ${year.format(end)}`;
+  }
+
+  if (start.getUTCFullYear() === end.getUTCFullYear()) {
+    return `${day.format(start)} ${month.format(start)}–${day.format(end)} ${month.format(end)} ${year.format(end)}`;
+  }
+
+  return `${day.format(start)} ${month.format(start)} ${year.format(start)}–${day.format(end)} ${month.format(end)} ${year.format(end)}`;
+}
+
+export function defaultPeriod(
+  timeZone: string,
+  now: Date = new Date(),
+): string {
+  const localDate = calendarDateInTimeZone(now, timeZone);
+  const dayOfWeek = localDate.getUTCDay();
+  const daysSinceMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  const start = new Date(localDate);
+  start.setUTCDate(localDate.getUTCDate() - daysSinceMonday);
+  const end = new Date(start);
+  end.setUTCDate(start.getUTCDate() + 6);
+
+  return `Week of ${formatWeekRange(start, end)}`;
 }
 
 function normalizePeriod(value: string | null, timeZone: string): string | null {
@@ -91,9 +149,9 @@ export function buildQuestionnaireEmbed(
 ): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(QUESTIONNAIRE_COLOR)
-    .setTitle(`Monthly Partnership Checkup • ${period}`)
+    .setTitle(`Weekly Partnership Checkup • ${period}`)
     .setDescription(
-      "Hello! It is time for our monthly Glixera Innovations partnership checkup. " +
+      "Hello! It is time for our weekly Glixera Innovations partnership checkup. " +
         "Please have one representative submit a response using the button below.",
     )
     .addFields(
@@ -142,7 +200,7 @@ function buildCheckupButtons(
 function buildAnswerModal(context: CheckupContext, config: AppConfig): ModalBuilder {
   const modal = new ModalBuilder()
     .setCustomId(createCheckupCustomId("submit", context, config.customIdSecret))
-    .setTitle(`Monthly checkup • ${context.period}`.slice(0, 45));
+    .setTitle(`Weekly checkup • ${context.period}`.slice(0, 45));
 
   const announcements = new TextInputBuilder()
     .setCustomId("announcements")
@@ -178,7 +236,7 @@ function buildAnswerModal(context: CheckupContext, config: AppConfig): ModalBuil
   );
 }
 
-export async function handleMonthlyCheckupCommand(
+export async function handleWeeklyCheckupCommand(
   interaction: ChatInputCommandInteraction,
   config: AppConfig,
   allowedRoleStore: AllowedRoleStore,
@@ -346,7 +404,7 @@ export async function handleMonthlyCheckupCommand(
   await interaction.editReply({
     embeds: [
       successEmbed(
-        "Monthly checkup sent",
+        "Weekly checkup sent",
         `Sent to ${questionnaireChannel} for ${partnerRole}. Completed answers will go to ${responseChannel}. [Open questionnaire](${questionnaire.url})`,
       ),
     ],
@@ -354,7 +412,7 @@ export async function handleMonthlyCheckupCommand(
   });
 }
 
-export async function handleMonthlyCheckupButton(
+export async function handleWeeklyCheckupButton(
   interaction: ButtonInteraction,
   config: AppConfig,
   allowedRoleStore: AllowedRoleStore,
@@ -428,7 +486,7 @@ export async function handleMonthlyCheckupButton(
   const existingEmbed = interaction.message.embeds[0];
   const closedEmbed = existingEmbed
     ? EmbedBuilder.from(existingEmbed)
-    : new EmbedBuilder().setTitle(`Monthly Partnership Checkup • ${parsed.period}`);
+    : new EmbedBuilder().setTitle(`Weekly Partnership Checkup • ${parsed.period}`);
 
   closedEmbed
     .setColor(CLOSED_COLOR)
@@ -440,13 +498,13 @@ export async function handleMonthlyCheckupButton(
   });
   await interaction.followUp({
     embeds: [
-      infoEmbed("Monthly checkup closed", "The monthly checkup is now closed."),
+      infoEmbed("Weekly checkup closed", "The weekly checkup is now closed."),
     ],
     flags: MessageFlags.Ephemeral,
   });
 }
 
-export async function handleMonthlyCheckupModal(
+export async function handleWeeklyCheckupModal(
   interaction: ModalSubmitInteraction,
   config: AppConfig,
   allowedRoleStore: AllowedRoleStore,
@@ -550,7 +608,7 @@ export async function handleMonthlyCheckupModal(
 
   const responseEmbed = new EmbedBuilder()
     .setColor(RESPONSE_COLOR)
-    .setTitle(`Monthly Checkup Response • ${parsed.period}`)
+    .setTitle(`Weekly Checkup Response • ${parsed.period}`)
     .setDescription(`Partnership: ${partnerRole}`)
     .setAuthor({
       name: interaction.user.username,
@@ -577,7 +635,7 @@ export async function handleMonthlyCheckupModal(
     embeds: [
       successEmbed(
         "Checkup submitted",
-        "Thank you! Your monthly partnership checkup was submitted successfully.",
+        "Thank you! Your weekly partnership checkup was submitted successfully.",
       ),
     ],
   });

@@ -1,8 +1,8 @@
 import { ChannelType, SlashCommandBuilder } from "discord.js";
 
-export const monthlyCheckupCommand = new SlashCommandBuilder()
-  .setName("monthly-checkup")
-  .setDescription("Send Glixera's monthly questionnaire to a partnership role.")
+export const weeklyCheckupCommand = new SlashCommandBuilder()
+  .setName("weekly-checkup")
+  .setDescription("Send Glixera's weekly questionnaire to a partnership role.")
   .addRoleOption((option) =>
     option
       .setName("partner-role")
@@ -25,7 +25,7 @@ export const monthlyCheckupCommand = new SlashCommandBuilder()
   .addStringOption((option) =>
     option
       .setName("period")
-      .setDescription("For example: August 2026.")
+      .setDescription("For example: Week of 17–23 Aug 2026.")
       .setMaxLength(40),
   );
 
@@ -61,6 +61,6 @@ export const allowedRoleCommand = new SlashCommandBuilder()
   );
 
 export const applicationCommands = [
-  monthlyCheckupCommand.toJSON(),
+  weeklyCheckupCommand.toJSON(),
   allowedRoleCommand.toJSON(),
 ];

@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { errorEmbed, successEmbed } from "../src/embeds.js";
-import { buildQuestionnaireEmbed } from "../src/monthlyCheckup.js";
+import {
+  buildQuestionnaireEmbed,
+  defaultPeriod,
+} from "../src/weeklyCheckup.js";
 
 test("standard response embeds include branding and a timestamp", () => {
   const success = successEmbed("Completed", "The action succeeded.").toJSON();
@@ -15,12 +18,26 @@ test("standard response embeds include branding and a timestamp", () => {
   assert.notEqual(success.color, error.color);
 });
 
-test("monthly questionnaire embeds deliberately omit the timestamp", () => {
+test("weekly questionnaire embeds deliberately omit the timestamp", () => {
   const questionnaire = buildQuestionnaireEmbed(
-    "August 2026",
+    "Week of 17–23 Aug 2026",
     "Test Manager",
   ).toJSON();
 
-  assert.equal(questionnaire.title, "Monthly Partnership Checkup • August 2026");
+  assert.equal(
+    questionnaire.title,
+    "Weekly Partnership Checkup • Week of 17–23 Aug 2026",
+  );
   assert.equal("timestamp" in questionnaire, false);
+});
+
+test("weekly periods use Monday through Sunday in the configured time zone", () => {
+  assert.equal(
+    defaultPeriod("Europe/Brussels", new Date("2026-08-16T22:30:00Z")),
+    "Week of 17–23 Aug 2026",
+  );
+  assert.equal(
+    defaultPeriod("Europe/Brussels", new Date("2026-12-31T12:00:00Z")),
+    "Week of 28 Dec 2026–3 Jan 2027",
+  );
 });

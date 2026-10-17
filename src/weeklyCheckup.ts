@@ -163,14 +163,18 @@ export async function handleWeeklyCheckupCommand(
   );
   const icon = interaction.guild.iconURL({ size: 256 });
   if (icon) embed.setThumbnail(icon);
+  const controls = {
+    id: randomBytes(12).toString("base64url"),
+    guildId: interaction.guildId,
+  };
   const message = await channel.send({
     content: partnerRole.toString(),
     embeds: [embed],
+    components: [buildCheckupButtons(controls, config)],
     allowedMentions: { parse: [], roles: [partnerRole.id] },
   });
   const record: CheckupRecord = {
-    id: randomBytes(12).toString("base64url"),
-    guildId: interaction.guildId,
+    ...controls,
     channelId: channel.id,
     messageId: message.id,
     partnerRoleId: partnerRole.id,
@@ -182,7 +186,6 @@ export async function handleWeeklyCheckupCommand(
   };
   try {
     await checkups.create(record);
-    await message.edit({ components: [buildCheckupButtons(record, config)] });
   } catch (error) {
     await checkups.close(record.id).catch(() => undefined);
     await message.delete().catch(() => undefined);

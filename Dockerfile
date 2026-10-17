@@ -27,12 +27,13 @@ FROM base AS runtime
 
 ENV NODE_ENV=production
 ENV DATA_DIR=/data
+ENV HEALTH_HOST=0.0.0.0
 
 RUN apk add --no-cache su-exec
 
-COPY --chown=node:node package.json package-lock.json ./
-COPY --from=production-dependencies --chown=node:node /app/node_modules ./node_modules
-COPY --from=build --chown=node:node /app/dist ./dist
+COPY package.json package-lock.json ./
+COPY --from=production-dependencies /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh

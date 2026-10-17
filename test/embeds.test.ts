@@ -13,7 +13,7 @@ test("standard response embeds include branding and a timestamp", () => {
 
   assert.equal(success.title, "Completed");
   assert.equal(success.description, "The action succeeded.");
-  assert.equal(success.footer?.text, "Glixera | Affiliate Services");
+  assert.equal(success.footer?.text, "Glixera | Affiliate Services • v0.3.0");
   assert.equal(typeof success.timestamp, "string");
   assert.notEqual(success.color, error.color);
 });

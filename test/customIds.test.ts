@@ -33,7 +33,10 @@ test("legacy monthly controls are routed to the invalid-control response", () =>
 
 test("tampered checkup IDs are rejected", () => {
   const customId = createCheckupCustomId("submit", context, secret);
-  const tampered = customId.replace(context.partnerRoleId, "123456789012345679");
+  const tampered = customId.replace(
+    context.partnerRoleId,
+    "123456789012345679",
+  );
 
   assert.equal(parseCheckupCustomId(tampered, secret), null);
   assert.equal(parseCheckupCustomId(customId, `${secret}-wrong`), null);
@@ -50,4 +53,36 @@ test("invalid Discord IDs cannot be encoded", () => {
       secret,
     ),
   );
+});
+
+test("stored controls have bounded length and are signed for their originating guild", async () => {
+  const { createStoredCheckupCustomId, parseStoredCheckupCustomId } =
+    await import("../src/customIds.js");
+  const id = createStoredCheckupCustomId(
+    "submit",
+    context.partnerRoleId,
+    "test-checkup-1234",
+    secret,
+  );
+  assert.ok(id.length <= 100);
+  assert.deepEqual(parseStoredCheckupCustomId(id, secret), {
+    action: "submit",
+    guildId: context.partnerRoleId,
+    checkupId: "test-checkup-1234",
+  });
+  assert.equal(
+    parseStoredCheckupCustomId(
+      id.replace(context.partnerRoleId, "345678901234567890"),
+      secret,
+    ),
+    null,
+  );
+  assert.equal(
+    parseStoredCheckupCustomId(
+      id.replace("test-checkup-1234", "test-checkup-5678"),
+      secret,
+    ),
+    null,
+  );
+  assert.equal(parseStoredCheckupCustomId(id, secret + "wrong"), null);
 });

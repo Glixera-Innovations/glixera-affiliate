@@ -1,227 +1,236 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { constants } from "node:fs";
+import { copyFile } from "node:fs/promises";
+import {
+  isRecord,
+  isSnowflake,
+  MutationQueue,
+  readStoredJson,
+  writeStoredJson,
+} from "./storage.js";
 
-const STORE_VERSION = 1;
-const STORE_FILENAME = "allowed-roles.json";
-const SNOWFLAKE_PATTERN = /^\d{17,20}$/;
+export type AccessLevel = "operator" | "manager";
+export type AccessSubject = "role" | "user";
 
-interface StoredAllowedRoles {
-  readonly version: typeof STORE_VERSION;
-  readonly guilds: Readonly<Record<string, readonly string[]>>;
+interface GuildSettings {
+  roleIds: string[];
+  managerRoleIds: string[];
+  userIds: string[];
+  managerUserIds: string[];
+  logChannelId: string | null;
+  legacyImported: boolean;
 }
 
-export interface AllowedRoleSnapshot {
-  readonly fallbackRoleIds: readonly string[];
-  readonly persistentRoleIds: readonly string[];
+interface StoredSettings {
+  version: 2;
+  guilds: Record<string, GuildSettings>;
+}
+
+export interface AllowedRoleSnapshot extends Readonly<GuildSettings> {
   readonly allRoleIds: readonly string[];
 }
 
-export type AddAllowedRoleResult = "added" | "already-added" | "fallback";
-export type RemoveAllowedRoleResult = "removed" | "not-found" | "fallback";
-
-interface RoleIdLookup {
+interface RoleLookup {
   has(roleId: string): boolean;
 }
+const MAX_ACCESS_ENTRIES = 100;
+const emptySettings = (): GuildSettings => ({
+  roleIds: [],
+  managerRoleIds: [],
+  userIds: [],
+  managerUserIds: [],
+  logChannelId: null,
+  legacyImported: false,
+});
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isMissingFileError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    "code" in error &&
-    (error as NodeJS.ErrnoException).code === "ENOENT"
-  );
-}
-
-function parseStore(content: string): Map<string, Set<string>> {
-  const parsed: unknown = JSON.parse(content);
-
-  if (!isRecord(parsed) || parsed.version !== STORE_VERSION || !isRecord(parsed.guilds)) {
-    throw new Error("The allowed-role store has an unsupported or invalid structure.");
+function readIds(value: unknown): string[] {
+  if (!Array.isArray(value) || value.some((id) => !isSnowflake(id))) {
+    throw new Error("Invalid Discord IDs in allowed-roles.json.");
   }
+  return [...new Set(value as string[])].sort();
+}
 
-  const guilds = new Map<string, Set<string>>();
-
-  for (const [guildId, roleIds] of Object.entries(parsed.guilds)) {
+function parseSettings(value: unknown): StoredSettings {
+  if (
+    !isRecord(value) ||
+    !isRecord(value.guilds) ||
+    (value.version !== 1 && value.version !== 2)
+  ) {
+    throw new Error(
+      "Unsupported allowed-role configuration. Restore a valid backup.",
+    );
+  }
+  const guilds: Record<string, GuildSettings> = {};
+  for (const [guildId, settings] of Object.entries(value.guilds)) {
+    if (!isSnowflake(guildId))
+      throw new Error("Invalid server ID in allowed-role configuration.");
+    if (value.version === 1) {
+      guilds[guildId] = { ...emptySettings(), roleIds: readIds(settings) };
+      continue;
+    }
     if (
-      !SNOWFLAKE_PATTERN.test(guildId) ||
-      !Array.isArray(roleIds) ||
-      roleIds.some(
-        (roleId: unknown) =>
-          typeof roleId !== "string" || !SNOWFLAKE_PATTERN.test(roleId),
-      )
+      !isRecord(settings) ||
+      typeof settings.legacyImported !== "boolean" ||
+      (settings.logChannelId !== null && !isSnowflake(settings.logChannelId))
     ) {
-      throw new Error("The allowed-role store contains an invalid Discord ID.");
+      throw new Error("Invalid server settings in allowed-roles.json.");
     }
-
-    guilds.set(guildId, new Set(roleIds as string[]));
+    guilds[guildId] = {
+      roleIds: readIds(settings.roleIds),
+      managerRoleIds: readIds(settings.managerRoleIds),
+      userIds: readIds(settings.userIds),
+      managerUserIds: readIds(settings.managerUserIds),
+      logChannelId: settings.logChannelId,
+      legacyImported: settings.legacyImported,
+    };
   }
-
-  return guilds;
+  return { version: 2, guilds };
 }
 
-function serializeStore(guilds: ReadonlyMap<string, ReadonlySet<string>>): string {
-  const storedGuilds: Record<string, readonly string[]> = {};
-
-  for (const [guildId, roleIds] of [...guilds.entries()].sort(([left], [right]) =>
-    left.localeCompare(right),
-  )) {
-    storedGuilds[guildId] = [...roleIds].sort();
-  }
-
-  const store: StoredAllowedRoles = {
-    version: STORE_VERSION,
-    guilds: storedGuilds,
-  };
-
-  return `${JSON.stringify(store, null, 2)}\n`;
-}
-
-function cloneGuilds(
-  guilds: ReadonlyMap<string, ReadonlySet<string>>,
-): Map<string, Set<string>> {
-  return new Map(
-    [...guilds].map(([guildId, roleIds]) => [guildId, new Set(roleIds)]),
-  );
-}
-
+/** Persistent per-server permissions and logging. The filename preserves 0.2.x data. */
 export class AllowedRoleStore {
-  readonly #dataDirectory: string;
-  readonly #filePath: string;
-  readonly #fallbackRoleIds: readonly string[];
-  #persistentRoles = new Map<string, Set<string>>();
-  #mutationQueue: Promise<void> = Promise.resolve();
+  readonly filePath: string;
+  readonly #legacyRoleIds: readonly string[];
+  readonly #queue = new MutationQueue();
+  #state: StoredSettings = { version: 2, guilds: {} };
 
-  constructor(dataDirectory: string, fallbackRoleIds: readonly string[]) {
-    this.#dataDirectory = dataDirectory;
-    this.#filePath = join(dataDirectory, STORE_FILENAME);
-    this.#fallbackRoleIds = Object.freeze([...new Set(fallbackRoleIds)]);
+  constructor(dataDirectory: string, legacyRoleIds: readonly string[] = []) {
+    this.filePath = join(dataDirectory, "allowed-roles.json");
+    this.#legacyRoleIds = legacyRoleIds;
   }
 
-  get filePath(): string {
-    return this.#filePath;
-  }
-
-  async initialize(): Promise<void> {
-    await mkdir(this.#dataDirectory, { recursive: true });
-
-    let content: string;
-
-    try {
-      content = await readFile(this.#filePath, "utf8");
-    } catch (error) {
-      if (!isMissingFileError(error)) {
-        throw error;
+  async initialize(guildIds: readonly string[] = []): Promise<void> {
+    const stored = await readStoredJson(this.filePath);
+    const state = stored === undefined ? this.#state : parseSettings(stored);
+    if (isRecord(stored) && stored.version === 1) {
+      try {
+        await copyFile(
+          this.filePath,
+          `${this.filePath}.v1.bak`,
+          constants.COPYFILE_EXCL,
+        );
+      } catch (error) {
+        if (!isRecord(error) || error.code !== "EEXIST") throw error;
       }
-
-      await this.#persist(new Map());
-      return;
     }
-
-    try {
-      this.#persistentRoles = parseStore(content);
-    } catch (error) {
-      const backupPath = `${this.#filePath}.corrupt-${Date.now()}`;
-      await rename(this.#filePath, backupPath);
-      console.error(
-        `Invalid allowed-role store moved to ${backupPath}; using fallback roles only.`,
-        error,
-      );
-      await this.#persist(new Map());
+    for (const guildId of guildIds) {
+      if (!isSnowflake(guildId))
+        throw new Error("Invalid configured server ID.");
+      const settings = state.guilds[guildId] ?? emptySettings();
+      if (!settings.legacyImported) {
+        settings.managerRoleIds = [
+          ...new Set([
+            ...settings.managerRoleIds,
+            ...readIds([...this.#legacyRoleIds]).filter((id) => id !== guildId),
+          ]),
+        ].sort();
+        settings.roleIds = settings.roleIds.filter(
+          (id) => !settings.managerRoleIds.includes(id),
+        );
+        settings.legacyImported = true;
+      }
+      state.guilds[guildId] = settings;
     }
+    await writeStoredJson(this.filePath, state);
+    this.#state = state;
   }
 
   getSnapshot(guildId: string): AllowedRoleSnapshot {
-    const persistentRoleIds = Object.freeze([
-      ...(this.#persistentRoles.get(guildId) ?? new Set<string>()),
-    ].sort());
-    const allRoleIds = Object.freeze([
-      ...new Set([...this.#fallbackRoleIds, ...persistentRoleIds]),
-    ]);
-
-    return Object.freeze({
-      fallbackRoleIds: this.#fallbackRoleIds,
-      persistentRoleIds,
-      allRoleIds,
-    });
+    const settings = structuredClone(
+      this.#state.guilds[guildId] ?? emptySettings(),
+    );
+    return {
+      ...settings,
+      allRoleIds: [
+        ...new Set([...settings.roleIds, ...settings.managerRoleIds]),
+      ],
+    };
   }
 
-  hasAllowedRole(guildId: string, memberRoleIds: RoleIdLookup): boolean {
-    return this.getSnapshot(guildId).allRoleIds.some((roleId) =>
-      memberRoleIds.has(roleId),
+  hasManager(guildId: string, userId: string, roles: RoleLookup): boolean {
+    const settings = this.getSnapshot(guildId);
+    return (
+      settings.managerUserIds.includes(userId) ||
+      settings.managerRoleIds.some((id) => roles.has(id))
     );
   }
 
-  hasFallbackRole(memberRoleIds: RoleIdLookup): boolean {
-    return this.#fallbackRoleIds.some((roleId) => memberRoleIds.has(roleId));
-  }
-
-  async addPersistentRole(
-    guildId: string,
-    roleId: string,
-  ): Promise<AddAllowedRoleResult> {
-    return this.#enqueueMutation(async () => {
-      if (this.#fallbackRoleIds.includes(roleId)) {
-        return "fallback";
-      }
-
-      if (this.#persistentRoles.get(guildId)?.has(roleId)) {
-        return "already-added";
-      }
-
-      const nextGuilds = cloneGuilds(this.#persistentRoles);
-      const nextRoleIds = nextGuilds.get(guildId) ?? new Set<string>();
-      nextRoleIds.add(roleId);
-      nextGuilds.set(guildId, nextRoleIds);
-      await this.#persist(nextGuilds);
-      return "added";
-    });
-  }
-
-  async removePersistentRole(
-    guildId: string,
-    roleId: string,
-  ): Promise<RemoveAllowedRoleResult> {
-    return this.#enqueueMutation(async () => {
-      if (this.#fallbackRoleIds.includes(roleId)) {
-        return "fallback";
-      }
-
-      if (!this.#persistentRoles.get(guildId)?.has(roleId)) {
-        return "not-found";
-      }
-
-      const nextGuilds = cloneGuilds(this.#persistentRoles);
-      const nextRoleIds = nextGuilds.get(guildId);
-      nextRoleIds?.delete(roleId);
-
-      if (nextRoleIds?.size === 0) {
-        nextGuilds.delete(guildId);
-      }
-
-      await this.#persist(nextGuilds);
-      return "removed";
-    });
-  }
-
-  #enqueueMutation<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.#mutationQueue.then(operation, operation);
-    this.#mutationQueue = result.then(
-      () => undefined,
-      () => undefined,
+  hasAccess(guildId: string, userId: string, roles: RoleLookup): boolean {
+    const settings = this.getSnapshot(guildId);
+    return (
+      this.hasManager(guildId, userId, roles) ||
+      settings.userIds.includes(userId) ||
+      settings.roleIds.some((id) => roles.has(id))
     );
-    return result;
   }
 
-  async #persist(nextGuilds: Map<string, Set<string>>): Promise<void> {
-    const temporaryPath = `${this.#filePath}.${process.pid}.${Date.now()}.tmp`;
-    await writeFile(temporaryPath, serializeStore(nextGuilds), {
-      encoding: "utf8",
-      mode: 0o600,
+  async setAccess(
+    guildId: string,
+    subject: AccessSubject,
+    id: string,
+    level: AccessLevel,
+  ): Promise<boolean> {
+    if (!isSnowflake(id)) throw new Error("Invalid access ID.");
+    if (subject === "role" && id === guildId)
+      throw new Error("Everyone cannot receive bot access.");
+    return this.#mutate(guildId, (settings) => {
+      const operatorKey = subject === "role" ? "roleIds" : "userIds";
+      const managerKey =
+        subject === "role" ? "managerRoleIds" : "managerUserIds";
+      const key = level === "manager" ? managerKey : operatorKey;
+      const otherKey = level === "manager" ? operatorKey : managerKey;
+      if (settings[key].includes(id) && !settings[otherKey].includes(id))
+        return false;
+      if (settings[key].length >= MAX_ACCESS_ENTRIES)
+        throw new Error("The access list is full (100 entries per list).");
+      settings[otherKey] = settings[otherKey].filter((entry) => entry !== id);
+      settings[key] = [...new Set([...settings[key], id])].sort();
+      return true;
     });
-    await rename(temporaryPath, this.#filePath);
-    this.#persistentRoles = nextGuilds;
+  }
+
+  async removeAccess(
+    guildId: string,
+    subject: AccessSubject,
+    id: string,
+  ): Promise<boolean> {
+    return this.#mutate(guildId, (settings) => {
+      const keys =
+        subject === "role"
+          ? (["roleIds", "managerRoleIds"] as const)
+          : (["userIds", "managerUserIds"] as const);
+      const existed = keys.some((key) => settings[key].includes(id));
+      for (const key of keys)
+        settings[key] = settings[key].filter((entry) => entry !== id);
+      return existed;
+    });
+  }
+
+  async setLogChannel(
+    guildId: string,
+    channelId: string | null,
+  ): Promise<void> {
+    if (channelId !== null && !isSnowflake(channelId))
+      throw new Error("Invalid log channel ID.");
+    await this.#mutate(guildId, (settings) => {
+      settings.logChannelId = channelId;
+    });
+  }
+
+  #mutate<T>(
+    guildId: string,
+    operation: (settings: GuildSettings) => T,
+  ): Promise<T> {
+    if (!isSnowflake(guildId))
+      return Promise.reject(new Error("Invalid server ID."));
+    return this.#queue.run(async () => {
+      const next = structuredClone(this.#state);
+      const settings = next.guilds[guildId] ?? emptySettings();
+      const result = operation(settings);
+      next.guilds[guildId] = settings;
+      await writeStoredJson(this.filePath, next);
+      this.#state = next;
+      return result;
+    });
   }
 }

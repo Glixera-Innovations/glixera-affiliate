@@ -21,7 +21,10 @@ function requireValue(environment: NodeJS.ProcessEnv, name: string): string {
   return value;
 }
 
-function requireSnowflake(environment: NodeJS.ProcessEnv, name: string): string {
+function requireSnowflake(
+  environment: NodeJS.ProcessEnv,
+  name: string,
+): string {
   const value = requireValue(environment, name);
 
   if (!SNOWFLAKE_PATTERN.test(value)) {
@@ -31,13 +34,15 @@ function requireSnowflake(environment: NodeJS.ProcessEnv, name: string): string 
   return value;
 }
 
-function parseAllowedRoleIds(environment: NodeJS.ProcessEnv): readonly string[] {
-  const values = requireValue(environment, "ALLOWED_ROLE_IDS")
+function parseAllowedRoleIds(
+  environment: NodeJS.ProcessEnv,
+): readonly string[] {
+  const values = (environment.ALLOWED_ROLE_IDS ?? "")
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
 
-  if (values.length === 0 || values.some((value) => !SNOWFLAKE_PATTERN.test(value))) {
+  if (values.some((value) => !SNOWFLAKE_PATTERN.test(value))) {
     throw new Error(
       "ALLOWED_ROLE_IDS must contain one or more comma-separated Discord role IDs.",
     );
@@ -47,10 +52,10 @@ function parseAllowedRoleIds(environment: NodeJS.ProcessEnv): readonly string[] 
 }
 
 function parseGuildIds(environment: NodeJS.ProcessEnv): readonly string[] {
-  const configuredGuildIds = environment.DISCORD_GUILD_IDS
-    ?.split(",")
-    .map((value) => value.trim())
-    .filter(Boolean) ?? [];
+  const configuredGuildIds =
+    environment.DISCORD_GUILD_IDS?.split(",")
+      .map((value) => value.trim())
+      .filter(Boolean) ?? [];
   const legacyGuildId = environment.DISCORD_GUILD_ID?.trim();
   const values = legacyGuildId
     ? [...configuredGuildIds, legacyGuildId]
@@ -75,8 +80,9 @@ function parseDataDirectory(value: string | undefined): string {
   return value?.trim() || "./data";
 }
 
-function parsePort(value: string | undefined): number {
-  const port = Number.parseInt(value ?? "8080", 10);
+export function parsePort(value: string | undefined): number {
+  const input = value ?? "8080";
+  const port = /^\d+$/.test(input) ? Number(input) : Number.NaN;
 
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
     throw new Error("PORT must be an integer between 1 and 65535.");
@@ -85,19 +91,30 @@ function parsePort(value: string | undefined): number {
   return port;
 }
 
+export function parseHealthHost(value: string | undefined): string {
+  const host = value ?? "127.0.0.1";
+  if (!["127.0.0.1", "0.0.0.0", "::1", "::"].includes(host))
+    throw new Error("HEALTH_HOST must be a loopback or wildcard IP address.");
+  return host;
+}
+
 function parseTimeZone(value: string | undefined): string {
   const timeZone = value?.trim() || "Europe/Brussels";
 
   try {
     new Intl.DateTimeFormat("en-GB", { timeZone }).format();
   } catch {
-    throw new Error(`TIME_ZONE is not a recognized IANA time zone: ${timeZone}`);
+    throw new Error(
+      `TIME_ZONE is not a recognized IANA time zone: ${timeZone}`,
+    );
   }
 
   return timeZone;
 }
 
-export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppConfig {
+export function loadConfig(
+  environment: NodeJS.ProcessEnv = process.env,
+): AppConfig {
   const customIdSecret = requireValue(environment, "CUSTOM_ID_SECRET");
 
   if (customIdSecret.length < 32) {

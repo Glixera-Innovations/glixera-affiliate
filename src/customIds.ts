@@ -18,6 +18,56 @@ export interface ParsedCheckupCustomId extends CheckupContext {
   readonly action: CheckupAction;
 }
 
+export interface StoredCheckupControl {
+  action: CheckupAction;
+  guildId: string;
+  checkupId: string;
+}
+
+export function createStoredCheckupCustomId(
+  action: CheckupAction,
+  guildId: string,
+  checkupId: string,
+  secret: string,
+): string {
+  if (
+    !SNOWFLAKE_PATTERN.test(guildId) ||
+    !/^[A-Za-z0-9_-]{16,24}$/.test(checkupId)
+  )
+    throw new Error("Invalid stored checkup ID.");
+  const unsigned = [PREFIX, "2", actionToCode(action), guildId, checkupId].join(
+    ":",
+  );
+  return `${unsigned}:${sign(unsigned, secret)}`;
+}
+
+export function parseStoredCheckupCustomId(
+  customId: string,
+  secret: string,
+): StoredCheckupControl | null {
+  const parts = customId.split(":");
+  if (parts.length !== 6) return null;
+  const [prefix, version, actionCode, guildId, checkupId, signature] = parts;
+  if (
+    prefix !== PREFIX ||
+    version !== "2" ||
+    !actionCode ||
+    !guildId ||
+    !checkupId ||
+    !signature ||
+    !SNOWFLAKE_PATTERN.test(guildId) ||
+    !/^[A-Za-z0-9_-]{16,24}$/.test(checkupId)
+  )
+    return null;
+  const action = codeToAction(actionCode);
+  if (
+    !action ||
+    !signaturesMatch(signature, sign(parts.slice(0, 5).join(":"), secret))
+  )
+    return null;
+  return { action, guildId, checkupId };
+}
+
 function actionToCode(action: CheckupAction): string {
   switch (action) {
     case "answer":
@@ -72,13 +122,17 @@ export function createCheckupCustomId(
     !SNOWFLAKE_PATTERN.test(context.partnerRoleId) ||
     !SNOWFLAKE_PATTERN.test(context.responseChannelId)
   ) {
-    throw new Error("Checkup custom IDs require valid Discord role and channel IDs.");
+    throw new Error(
+      "Checkup custom IDs require valid Discord role and channel IDs.",
+    );
   }
 
   const period = context.period.trim();
 
   if (period.length === 0 || period.length > 40) {
-    throw new Error("The checkup period must contain between 1 and 40 characters.");
+    throw new Error(
+      "The checkup period must contain between 1 and 40 characters.",
+    );
   }
 
   const unsigned = [
@@ -92,7 +146,9 @@ export function createCheckupCustomId(
   const customId = `${unsigned}:${sign(unsigned, secret)}`;
 
   if (customId.length > 100) {
-    throw new Error("The generated Discord component ID is longer than 100 characters.");
+    throw new Error(
+      "The generated Discord component ID is longer than 100 characters.",
+    );
   }
 
   return customId;
@@ -108,8 +164,15 @@ export function parseCheckupCustomId(
     return null;
   }
 
-  const [prefix, version, actionCode, partnerRoleId, responseChannelId, encodedPeriod, signature] =
-    parts;
+  const [
+    prefix,
+    version,
+    actionCode,
+    partnerRoleId,
+    responseChannelId,
+    encodedPeriod,
+    signature,
+  ] = parts;
 
   if (
     prefix !== PREFIX ||

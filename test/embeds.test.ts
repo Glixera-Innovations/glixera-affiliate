@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { errorEmbed, successEmbed } from "../src/embeds.js";
+import { APP_VERSION } from "../src/version.js";
 import {
   buildQuestionnaireEmbed,
   defaultPeriod,
@@ -13,7 +14,10 @@ test("standard response embeds include branding and a timestamp", () => {
 
   assert.equal(success.title, "Completed");
   assert.equal(success.description, "The action succeeded.");
-  assert.equal(success.footer?.text, "Glixera | Affiliate Services • v0.3.0");
+  assert.equal(
+    success.footer?.text,
+    `Glixera | Affiliate Services • v${APP_VERSION}`,
+  );
   assert.equal(typeof success.timestamp, "string");
   assert.notEqual(success.color, error.color);
 });

@@ -9,6 +9,7 @@ import {
   type ButtonInteraction,
   type ChatInputCommandInteraction,
   type ModalSubmitInteraction,
+  type MessageCreateOptions,
 } from "discord.js";
 import { AllowedRoleStore } from "../src/allowedRoleStore.js";
 import { handleAccessCommand } from "../src/allowedRoles.js";
@@ -23,6 +24,7 @@ import {
 } from "../src/customIds.js";
 import {
   handleWeeklyCheckupButton,
+  handleWeeklyCheckupCommand,
   handleWeeklyCheckupModal,
 } from "../src/weeklyCheckup.js";
 
@@ -99,6 +101,135 @@ async function setup() {
     cleanup: () => rm(directory, { recursive: true, force: true }),
   };
 }
+
+function postingInteraction(
+  fixture: Awaited<ReturnType<typeof setup>>,
+  send: (payload: MessageCreateOptions) => Promise<unknown>,
+) {
+  const channel = {
+    id: record.channelId,
+    type: ChannelType.GuildText,
+    permissionsFor: () => ({ has: () => true }),
+    send,
+  };
+  const role = {
+    id: record.partnerRoleId,
+    managed: false,
+    mentionable: true,
+    permissions: new PermissionsBitField(0n),
+    toString: () => `<@&${record.partnerRoleId}>`,
+  };
+  return {
+    ...fixture.interaction,
+    guild: {
+      ...fixture.interaction.guild,
+      members: { me: {} },
+      iconURL: () => null,
+    },
+    options: {
+      getRole: () => role,
+      getChannel: (name: string) =>
+        name === "questionnaire-channel" ? channel : null,
+      getString: () => "Week 42",
+    },
+  } as unknown as ChatInputCommandInteraction<"cached">;
+}
+
+test("new questionnaires include working buttons in their initial message without a follow-up edit", async () => {
+  const fixture = await setup();
+  try {
+    let controlId = "";
+    let sends = 0;
+    const interaction = postingInteraction(fixture, async (payload) => {
+      sends += 1;
+      const body = JSON.parse(JSON.stringify(payload)) as {
+        components?: {
+          components: { custom_id: string; label: string; disabled: boolean }[];
+        }[];
+      };
+      assert.equal(
+        body.components?.length,
+        1,
+        "The initial message must already contain its button row",
+      );
+      const buttons = body.components![0]!.components;
+      assert.deepEqual(
+        buttons.map((button) => button.label),
+        ["Answer checkup", "Close checkup"],
+      );
+      assert.ok(buttons.every((button) => !button.disabled));
+      controlId = buttons[0]!.custom_id;
+      assert.deepEqual(payload.allowedMentions, {
+        parse: [],
+        roles: [record.partnerRoleId],
+      });
+      return {
+        id: "890123456789012345",
+        url: "https://discord.com/channels/123456789012345678/234567890123456789/890123456789012345",
+        edit: async () => {
+          assert.fail(
+            "Questionnaire creation must not depend on editing the posted message",
+          );
+        },
+        delete: async () => undefined,
+      };
+    });
+    await handleWeeklyCheckupCommand(
+      interaction,
+      config,
+      fixture.access,
+      fixture.checkups,
+      fixture.audit,
+    );
+    const control = parseStoredCheckupCustomId(
+      controlId,
+      config.customIdSecret,
+    );
+    assert.equal(control?.action, "answer");
+    assert.equal(
+      fixture.checkups.get(control!.checkupId)?.messageId,
+      "890123456789012345",
+    );
+    assert.equal(sends, 1);
+    assert.equal(
+      fixture.replies[0]?.embeds?.[0]?.toJSON().title,
+      "Weekly checkup sent",
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("a questionnaire is removed if its persistent state cannot be saved", async (context) => {
+  const fixture = await setup();
+  try {
+    let removed = false;
+    context.mock.method(fixture.checkups, "create", async () => {
+      throw new Error("Storage unavailable");
+    });
+    const interaction = postingInteraction(fixture, async () => ({
+      id: "890123456789012345",
+      delete: async () => {
+        removed = true;
+      },
+    }));
+    await assert.rejects(
+      handleWeeklyCheckupCommand(
+        interaction,
+        config,
+        fixture.access,
+        fixture.checkups,
+        fixture.audit,
+      ),
+      /Storage unavailable/,
+    );
+    assert.equal(removed, true);
+    assert.equal(fixture.replies.length, 0);
+    assert.equal(fixture.logs.length, 0);
+  } finally {
+    await fixture.cleanup();
+  }
+});
 
 test("a 0.2.x weekly button opens the new rated form and upgrades its controls", async () => {
   const fixture = await setup();

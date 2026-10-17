@@ -98,7 +98,7 @@ export function buildQuestionnaireEmbed(
 }
 
 export function buildCheckupButtons(
-  record: CheckupRecord,
+  record: Pick<CheckupRecord, "id" | "guildId">,
   config: AppConfig,
   disabled = false,
 ): ActionRowBuilder<ButtonBuilder> {

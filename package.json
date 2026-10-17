@@ -1,6 +1,6 @@
 {
   "name": "glixera-affiliate",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Discord bot for managing Glixera Innovations partnership checkups.",
   "private": true,
   "type": "module",

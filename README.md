@@ -1,9 +1,6 @@
 # Glixera | Affiliate Services
 
-[![Build and test](https://github.com/Glixera-Innovations/glixera-affiliate/actions/workflows/ci.yml/badge.svg)](https://github.com/Glixera-Innovations/glixera-affiliate/actions/workflows/ci.yml)
-[![CodeQL Advanced](https://github.com/Glixera-Innovations/glixera-affiliate/actions/workflows/codeql.yml/badge.svg)](https://github.com/Glixera-Innovations/glixera-affiliate/actions/workflows/codeql.yml)
-
-**Version 0.3.0** — a Discord bot for Glixera Innovations partnership questionnaires, feedback and ratings.
+a Discord bot for Glixera Innovations partnership questionnaires, feedback and ratings.
 
 ## Commands
 

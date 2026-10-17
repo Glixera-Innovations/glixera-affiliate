@@ -4,7 +4,9 @@ function getDiscordErrorCode(error: unknown): string | number | undefined {
   }
 
   const { code } = error as { readonly code?: unknown };
-  return typeof code === "string" || typeof code === "number" ? code : undefined;
+  return typeof code === "string" || typeof code === "number"
+    ? code
+    : undefined;
 }
 
 export function isDiscordMissingAccessError(error: unknown): boolean {
